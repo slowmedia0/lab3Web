@@ -8,38 +8,39 @@ import tools.Validator;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 
 @WebServlet(GlobalDefs.pathService)
 public class AreaCheckServlet extends HttpServlet {
     private PointsDao repository;
+    private Validator validator;
+
+    @Override
+    public void init() throws ServletException {
+        repository = new PointsDao(getServletContext());
+        validator = new Validator();
+    }
 
     @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
         if (request.getParameter("clear")!=null){
             if (repository.clearPoints()){
-                // Возвращаем ответ на фронтенд об успехе
-                // sendJsonResponse("{\"cleared\": true}");
+                sendJsonResponse(response, 200, "{\"cleared\": true}");
             }
             else {
-                // Возвращаем ответ на фронтенд о неудаче
-                //sendJsonResponse(500, "Internal Server Error", "{\"error\": \"JDBC-query is not correct!\"}");
+                sendJsonResponse(response, 500, "{\"error\": \"Storage error!\"}");
             }
         }
         else if (request.getParameter("pageNumber")!=null && request.getParameter("pageSize")!=null){
             String pageNumberStr =  request.getParameter("pageNumber");
             String pageSizeStr = request.getParameter("pageSize");
 
-            boolean isValid = Validator.validatePageDbSizeStr(pageNumberStr) &&
-                    Validator.validatePageDbNumberStr(pageSizeStr);
+            boolean isValid = validator.validatePageDbNumberStr(pageNumberStr) &&
+                    validator.validatePageDbSizeStr(pageSizeStr);
 
             if (!isValid) {
-                /* Возвращаем ответ фронту о ошибки валидации
-                String jsonResponse = String.format(
-                        "{\"validatePageParams\": false}"
-                );
-                sendJsonResponse(400, "Bad Request", jsonResponse);
-                 */
+                sendJsonResponse(response, 400, "{\"validatePageParams\": false}");
+                return;
             }
 
             int pageNumber, pageSize;
@@ -54,9 +55,10 @@ public class AreaCheckServlet extends HttpServlet {
                     totalPages, pointsJson
             );
 
-            /* Возвращаем ответ на фронтенд об успехе
-            sendJsonResponse(jsonResponse);
-             */
+            sendJsonResponse(response, 200, jsonResponse);
+        }
+        else {
+            sendJsonResponse(response, 400, "{\"error\": \"Unsupported parameters\"}");
         }
     }
 
@@ -68,50 +70,57 @@ public class AreaCheckServlet extends HttpServlet {
             String yStr = request.getParameter("y");
             String rStr = request.getParameter("r");
 
-            boolean isValid = Validator.validateX(xStr)
-                    && Validator.validateY(yStr)
-                    && Validator.validateR(rStr);
+            boolean isValid = validator.validateX(xStr)
+                    && validator.validateY(yStr)
+                    && validator.validateR(rStr);
+
+            String currentTime = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS).toString();
 
             if (!isValid) {
                 long executionTime = System.nanoTime() - startTime;
-                String currentTime = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
 
                 repository.insertFailedAttempt(xStr, yStr, rStr);
-                /*
+
                 String jsonResponse = String.format(
                         "{\"validatePoint\": false, \"popadanie\": false, \"currentTime\": \"%s\", \"executionTime\": \"%d ns\"}",
                         currentTime, executionTime
                 );
-                sendJsonResponse(400, "Bad Request", jsonResponse);
-                 */
+                sendJsonResponse(response, 400, jsonResponse);
+                return;
             }
 
-            double y;
-            int x, r;
-            x = Integer.parseInt(rStr.trim().replace(",", "."));
+            double x, y;
+            int r;
+            x = Double.parseDouble(xStr.trim().replace(",", "."));
             y = Double.parseDouble(yStr.trim().replace(",", "."));
-            r = Integer.parseInt(rStr.trim().replace(",", "."));
+            r = Integer.parseInt(rStr.trim());
 
             boolean isHit = checkArea(x, y, r);
             long executionTime = System.nanoTime() - startTime;
 
-            String jsonResponse;
             if (repository.insertPoint(x, y, r, isHit, executionTime)){
-                /*
-                jsonResponse = String.format(
+                String jsonResponse = String.format(
                         "{\"validatePoint\": %b, \"popadanie\": %b, \"currentTime\": \"%s\", \"executionTime\": \"%d ns\"}",
                         isValid, isHit, currentTime, executionTime
                 );
-                sendJsonResponse(jsonResponse);
-                 */
+                sendJsonResponse(response, 200, jsonResponse);
             }
             else {
-                /*
-                sendJsonResponse(400, "Bad Request", "{\"error\": \"JDBC-query is not correct!\"}");
-                 */
+                sendJsonResponse(response, 500, "{\"error\": \"Storage error!\"}");
             }
         }
+        else {
+            sendJsonResponse(response, 400, "{\"error\": \"x, y and r are required\"}");
+        }
     }
+
+    private void sendJsonResponse(HttpServletResponse response, int status, String json) throws IOException {
+        response.setStatus(status);
+        response.setContentType("application/json");
+        response.setCharacterEncoding("UTF-8");
+        response.getWriter().write(json);
+    }
+
 
     private static boolean checkArea(double x, double y, double r) {
         // Прямоугольник
@@ -119,7 +128,9 @@ public class AreaCheckServlet extends HttpServlet {
             return true;
         }
         // Четверть окружности
-        if ()
+        if (x >= 0 && y <= 0 && (Math.pow(x,2)+Math.pow(y,2)<=Math.pow(r / 2,2))){
+            return true;
+        }
         // Треугольник
         if (x >= -r && x <= 0 && y >= 0 && y<=r && y <= (x + r)) {
             return true;

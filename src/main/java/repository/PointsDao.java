@@ -1,121 +1,110 @@
 package repository;
+import dto.FailledAttempt;
+import dto.Point;
+import jakarta.servlet.ServletContext;
+
 import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
 
-public class JdbcRepository {
-    private static final String URL = "jdbc:postgresql://localhost:5432/lab2Web";
-    private static final String USER = "postgres";
-    private static final String PASS = "56793";
+public class PointsDao {
+    private final ServletContext servletContext;
 
-    public boolean insertPoint(double x, double y, int r, boolean hit, String time, long exec) {
-        try (Connection c = DriverManager.getConnection(URL, USER, PASS);
-             PreparedStatement ps = c.prepareStatement(
-                     "INSERT INTO points (x, y, r, hit, current_time_back, execution_time) VALUES (?, ?, ?, ?, ?, ?)")) {
-            ps.setDouble(1, x);
-            ps.setDouble(2, y);
-            ps.setInt(3, r);
-            ps.setBoolean(4, hit);
-            ps.setTimestamp(5, Timestamp.valueOf(time));
-            ps.setLong(6, exec);
-            ps.executeUpdate();
-            return true;
-        } catch (SQLException e) {
-            LoggerCustom.log("insertPoint: " + e.getMessage());
-            return  false;
-        }
+    public PointsDao(ServletContext servletContext) {
+        this.servletContext = servletContext;
     }
 
-    public boolean insertFailedAttempt(String x, String y, String r) {
-        try (Connection c = DriverManager.getConnection(URL, USER, PASS);
-             PreparedStatement ps = c.prepareStatement(
-                     "INSERT INTO failed_attemps_of_points (x_param, y_param, r_param) VALUES (?, ?, ?)")) {
-            // в таблице стоит ограничение длины 15 символов
-            ps.setString(1, cut(x));
-            ps.setString(2, cut(y));
-            ps.setString(3, cut(r));
-            ps.executeUpdate();
-            return true;
-        } catch (SQLException e) {
-            LoggerCustom.log("insertFailedAttempt: " + e.getMessage());
-            return  false;
+    public boolean insertPoint(double x, double y, int r, boolean hit, long exec) {
+        Point point = new Point(x,y,r, hit, exec);
+        List<Point> points = (List<Point>) servletContext.getAttribute("points");
+        if (points == null){
+            points = new ArrayList<>();
+            servletContext.setAttribute("points",points);
+            points.add(0,point);
         }
+        else {
+            boolean flag = points.stream().anyMatch(elem -> elem.id().equals(point.id()));
+            if (!flag){
+                points.add(0,point);
+            }
+            else {
+                //Дублирование элементов
+                return false;
+            }
+        }
+        return true;
     }
 
-    private String cut(String s) {
-        return s != null && s.length() > 15 ? s.substring(0, 15) : s;
+    public boolean insertFailedAttempt(String xParam, String yParam, String rParam) {
+        FailledAttempt failledAttempt = new FailledAttempt(xParam,yParam,rParam);
+        List<FailledAttempt> failledAttempts = (List<FailledAttempt>) servletContext.getAttribute("failledAttempts");
+        if (failledAttempts == null){
+            failledAttempts = new ArrayList<>();
+            servletContext.setAttribute("failledAttempts",failledAttempts);
+            failledAttempts.add(0,failledAttempt);
+        }
+        else {
+            boolean flag = failledAttempts.stream().anyMatch(elem -> elem.id().equals(failledAttempt.id()));
+            if (!flag){
+                failledAttempts.add(0,failledAttempt);
+            }
+            else {
+                //Дублирование элементов
+                return false;
+            }
+        }
+        return true;
     }
 
     public boolean clearPoints() {
-        try (Connection c = DriverManager.getConnection(URL, USER, PASS);
-             Statement s = c.createStatement()) {
-            s.executeUpdate("TRUNCATE TABLE points");
-            return true;
-        } catch (SQLException e) {
-            LoggerCustom.log("clearPoints: " + e.getMessage());
-            return false;
-        }
+        servletContext.setAttribute("points",new ArrayList<>());
+        return  true;
     }
 
 
-    public static String getPointsPage(int pageNumber, int pageSize) {
-        StringBuilder sb = new StringBuilder("[");
-        int offset = (pageNumber - 1) * pageSize;
-
-        try (Connection c = DriverManager.getConnection(URL, USER, PASS);
-             PreparedStatement ps = c.prepareStatement(
-                     "SELECT x, y, r, hit, current_time_back, execution_time " +
-                             "FROM points ORDER BY id DESC LIMIT ? OFFSET ?")) {
-
-            ps.setInt(1, pageSize);
-            ps.setInt(2, offset);
-
-            try (ResultSet rs = ps.executeQuery()) {
-                boolean first = true;
-
-                while (rs.next()) {
-                    if (!first) {
-                        sb.append(",");
-                    }
-                    first = false;
-
-                    String t = rs.getTimestamp("current_time_back")
-                            .toString()
-                            .substring(0, 19);
-
-                    sb.append(String.format(
-                            java.util.Locale.US,
-                            "{\"x\":%.2f,\"y\":%.2f,\"r\":%d," +
-                                    "\"popadanie\":%b,\"currentTime\":\"%s\"," +
-                                    "\"executionTime\":%d}",
-                            rs.getDouble(1),
-                            rs.getDouble(2),
-                            rs.getInt(3),
-                            rs.getBoolean(4),
-                            t,
-                            rs.getLong(6)
-                    ));
-                }
-            }
-        } catch (SQLException e) {
-            LoggerCustom.log("getPointsPage: " + e.getMessage());
+    public String getPointsPage(int pageNumber, int pageSize) {
+        List<Point> points = (List<Point>) servletContext.getAttribute("points");
+        if (points == null || points.isEmpty()) {
             return "[]";
         }
-
+        int offset = (pageNumber - 1) * pageSize;
+        if (offset < 0 || offset >= points.size()) {
+            return "[]";
+        }
+        List<Point> pageSlice = points.stream()
+                .skip(offset)
+                .limit(pageSize)
+                .toList();
+        StringBuilder sb = new StringBuilder("[");
+        boolean first = true;
+        java.time.format.DateTimeFormatter formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        for (Point p : pageSlice) {
+            if (!first) {
+                sb.append(",");
+            }
+            first = false;
+            String t = p.currentTime().format(formatter);
+            sb.append(String.format(
+                    java.util.Locale.US,
+                    "{\"x\":%.2f,\"y\":%.2f,\"r\":%d,\"popadanie\":%b,\"currentTime\":\"%s\",\"executionTime\":%d}",
+                    p.x(), p.y(), p.r(), p.hit(), t, p.executionTime()
+            ));
+        }
         sb.append("]");
         return sb.toString();
     }
 
 
-    public static int getTotalPages(int pageSize) {
-        try (Connection c = DriverManager.getConnection(URL, USER, PASS);
-             Statement s = c.createStatement();
-             ResultSet rs = s.executeQuery("SELECT COUNT(*) FROM points")) {
-            if (rs.next()) {
-                int total = rs.getInt(1);
-                return Math.max(1, (total + pageSize - 1) / pageSize);
-            }
-        } catch (SQLException e) {
-            LoggerCustom.log("getTotalPages: " + e.getMessage());
+    public int getTotalPages(int pageSize) {
+        List<Point> points = (List<Point>) servletContext.getAttribute("points");
+        int totalPages = 1;
+        if (points==null){
+            servletContext.setAttribute("points",new ArrayList<>());
         }
-        return 1;
+        else {
+            int total = points.size();
+            totalPages = Math.max(1, (total + pageSize - 1) / pageSize);
+        }
+        return totalPages;
     }
 }
