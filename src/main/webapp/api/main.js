@@ -122,6 +122,15 @@ function logFront(level, message) {
 }
 
 canvas.addEventListener("click", function(event) {
+    if (!validateAndSetX()) {
+            const xError = document.getElementById("x-error");
+            xError.textContent = "Невозможно определить координаты: сначала выберите X на форме!";
+            xError.style.display = "block";
+            logFront("WARN", "Canvas click ignored: X is not selected");
+            return;
+    }
+
+
     if (!validateAndSetR()) {
         document.getElementById("r-error").textContent = "Невозможно определить координаты: сначала выберите R!";
         logFront("WARN", "Canvas click ignored: R is not selected");
@@ -129,12 +138,17 @@ canvas.addEventListener("click", function(event) {
     }
 
     const rect = canvas.getBoundingClientRect();
-    const clickX = event.clientX - rect.left;
     const clickY = event.clientY - rect.top;
 
     const scale = R / r;
-    x = parseFloat(((clickX - xc) / scale).toFixed(2));
     y = parseFloat(((yc - clickY) / scale).toFixed(2));
+
+    document.getElementById("Y").value = y;
+
+    if (!validateAndSetY()) {
+        logFront("WARN", "Canvas click rejected by Y validation");
+        return;
+    }
 
     logFront("INFO", `Sending point from canvas click: x=${x}, y=${y}, r=${r}`);
     playSound();
@@ -162,15 +176,16 @@ canvas.addEventListener("click", function(event) {
     });
 });
 
+
 function checkPoint() {
     if (!validateForm()) {
         logFront("WARN", "Client-side validation failed, request not sent");
         return; // Прерываем отправку, если форма заполнена с ошибками
     }
-    
+
     logFront("INFO", `Sending point: x=${x}, y=${y}, r=${r}`);
     playSound();
-    
+
     $.ajax({
         url: 'controller-servlet',
         method: 'POST',
@@ -191,7 +206,7 @@ function checkPoint() {
         error: function(xhr) {
             logFront("ERROR", `Point request failed: HTTP ${xhr.status}`);
         }
-    });   
+    });
 }
 
 function validateForm() {
@@ -201,7 +216,7 @@ function validateForm() {
 function validateAndSetX() {
     const selectX = document.getElementById("selectX");
     let errorElement = document.getElementById("x-error");
-    
+
     function showError(message) {
         if (errorElement) {
             errorElement.textContent = message;
@@ -222,7 +237,13 @@ function validateAndSetX() {
         showError("Для X должно быть выбрано только одно значение!");
         return false;
     }
-    x = parseFloat(selectX.value);
+    const allowedX = [-3, -2, -1, 0, 1, 2, 3, 4, 5];
+    let valX = parseInt(selectX.value, 10);
+    if (isNaN(valX) || !allowedX.includes(valX)) {
+        showError("Недопустимое значение X!");
+        return false;
+    }
+    x = valX;
     return true;
 }
 
@@ -275,7 +296,7 @@ function validateAndSetY() {
 function validateAndSetR() {
     const activeBtn = document.querySelector('.r-btn.active');
     let errorElement = document.getElementById("r-error");
-    
+
     function showError(message) {
         if (errorElement) {
             errorElement.textContent = message;
@@ -296,7 +317,13 @@ function validateAndSetR() {
         showError("Для R должно быть выбрано только одно значение!");
         return false;
     }
-    r = parseFloat(activeBtn.value);
+    const allowedR = [1, 2, 3, 4, 5];
+    let valR = parseInt(activeBtn.value, 10);
+    if (isNaN(valR) || !allowedR.includes(valR)) {
+        showError("Недопустимое значение R!");
+        return false;
+    }
+    r = valR;
     return true;
 }
 
